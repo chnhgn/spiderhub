@@ -5,6 +5,9 @@ from scrapy_redis.spiders import RedisCrawlSpider
 from scrapy.spiders import Rule
 from scrapy.linkextractors import LinkExtractor
 from spiderhub.items import ApartmentItem
+from scrapy.utils.response import get_base_url
+from scrapy.utils.url import urljoin_rfc
+import json
 
 
 class LinkhomeSpider(RedisCrawlSpider):
@@ -15,8 +18,25 @@ class LinkhomeSpider(RedisCrawlSpider):
     allowed_domains = ['bj.lianjia.com']
     
     rules = (
-        Rule(LinkExtractor(restrict_xpaths="//div[contains(@class,'title')]/a[contains(@href,'https://bj.lianjia.com/ershoufang/')]"), callback="parse_detail", follow=False),
+#         Rule(LinkExtractor(restrict_xpaths="//div[contains(@class,'title')]/a[contains(@href,'https://bj.lianjia.com/ershoufang/')]"), callback="parse_detail", follow=False),
     )
+
+    def parse(self, response):
+        pageinfo = response.xpath("//div[@class='page-box house-lst-page-box']/@page-data").extract_first()
+        pageinfo = json.loads(pageinfo)
+        totalpage = int(pageinfo['totalPage'])
+        currentpage = int(pageinfo['curPage'])
+        pageurl = '/ershoufang/pg%s'
+        base_url = get_base_url(response)
+        url = str(urljoin_rfc(base_url, pageurl), encoding='utf-8')
+        
+        link = LinkExtractor(restrict_xpaths="//div[contains(@class,'title')]/a[contains(@href,'https://bj.lianjia.com/ershoufang/')]")
+        links = link.extract_links(response)
+        for lnk in links:
+            yield scrapy.Request(url=lnk.url, callback=self.parse_detail)
+        
+        if currentpage < totalpage:
+            yield scrapy.Request(url=url % str(currentpage + 1), callback=self.parse)
 
     def parse_detail(self, response):
         item = ApartmentItem()
