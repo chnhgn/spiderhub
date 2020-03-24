@@ -53,8 +53,13 @@ COOKIES_ENABLED = False
 # See https://docs.scrapy.org/en/latest/topics/downloader-middleware.html
 DOWNLOADER_MIDDLEWARES = {
    'scrapy.downloadermiddleware.useragent.UserAgentMiddleware': None,
-   'spiderhub.middlewares.SpiderhubDownloaderMiddleware': 543,
+   'scrapy.downloadermiddlewares.retry.RetryMiddleware': None,
+   'spiderhub.middlewares.SpiderhubDownloaderMiddleware': 200,
+   'spiderhub.middlewares.SpiderRetryMiddleware': 300,
 }
+
+RETRY_ENABLED = True
+RETRY_TIMES = 100
 
 # Enable or disable extensions
 # See https://docs.scrapy.org/en/latest/topics/extensions.html

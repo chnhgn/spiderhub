@@ -6,7 +6,18 @@
 # https://docs.scrapy.org/en/latest/topics/spider-middleware.html
 
 from scrapy import signals
-import random
+import random, requests, json
+import threading
+
+from scrapy.downloadermiddlewares.retry import RetryMiddleware, response_status_message
+import logging
+from twisted.internet import defer
+from twisted.internet.error import TimeoutError, DNSLookupError, \
+    ConnectionRefusedError, ConnectionDone, ConnectError, \
+    ConnectionLost, TCPTimedOutError
+from urllib3.exceptions import ProtocolError, ProxyError, ProxySchemeUnknown
+from twisted.web.client import ResponseFailed
+from scrapy.core.downloader.handlers.http11 import TunnelError
 
 
 class SpiderhubSpiderMiddleware(object):
@@ -105,3 +116,93 @@ class SpiderhubDownloaderMiddleware(object):
 
     def spider_opened(self, spider):
         spider.logger.info('Spider opened: %s' % spider.name)
+        
+
+class SpiderRetryMiddleware(RetryMiddleware):
+    
+    logger = logging.getLogger(__name__)
+
+    EXCEPTIONS_TO_RETRY = (defer.TimeoutError, TimeoutError, DNSLookupError,
+                           ConnectionRefusedError, ConnectionDone, ConnectError,
+                           ConnectionLost, TCPTimedOutError, ResponseFailed,
+                           IOError, TunnelError, ProtocolError, ProxyError, ProxySchemeUnknown)
+    proxy_list = []
+    lock = threading.Lock()
+    
+    host = '127.0.0.1'
+    port = '5010'
+    get_ip_endpoint = '/get'
+    del_ip_endpoint = '/delete?proxy=%s'
+
+    def get_proxy_api(self, num=10):
+        ip_list = []
+        
+        for i in range(num):
+            response = requests.get("http://%s:%s%s" % (self.host, self.port, self.get_ip_endpoint))
+            content = json.loads(response.content.decode())
+            ip_list.append(content['proxy'])
+        return ip_list
+
+    def delete_proxy_api(self, proxy):
+        requests.get("http://%s:%s%s" % (self.host, self.port, self.del_ip_endpoint % proxy))
+
+    def get_proxy_ip(self):
+        self.lock.acquire()
+        if not self.proxy_list:
+            print('IP list is empty, getting IP...')
+            self.proxy_list.extend(self.get_proxy_api())
+            
+        proxy_ip = self.proxy_list.pop(0) if self.proxy_list else ''
+        self.lock.release()
+        return proxy_ip
+
+    def delete_proxy(self, proxy):
+        if proxy in self.proxy_list:
+            self.proxy_list.remove(proxy)
+            # Delete the IP in database
+            self.delete_proxy_api(proxy)
+
+    def process_request(self, request, spider):
+        proxy_ip = request.meta.get('proxy')
+        if not proxy_ip:
+            proxy_ip = self.get_proxy_ip()
+            request.meta['proxy'] = proxy_ip
+            if proxy_ip not in self.proxy_list:
+                self.proxy_list.append(proxy_ip)
+
+    def process_response(self, request, response, spider):
+        proxy_ip = request.meta.get('proxy')
+        
+        if not response.body:
+            print(response.body)
+            self.logger.info('The IP is forbidden, changing another IP...')
+            print(proxy_ip)
+            self.delete_proxy(proxy_ip)  # Delete the invalid IP
+            proxy_ip = self.get_proxy_ip()  # Get a new IP
+            request.meta['proxy'] = proxy_ip
+            if proxy_ip not in self.proxy_list:
+                self.proxy_list.append(proxy_ip)
+            return request
+
+        if request.meta.get('dont_retry', False):
+            return response
+        
+        if response.status in self.retry_http_codes:
+            reason = response_status_message(response.status)
+            self.delete_proxy(request.meta.get('proxy', False))  # Delete the IP if it's in the official retry status code
+            self.logger.info('Return invalid value, retrying...')
+            return self._retry(request, reason, spider) or response
+        
+        return response
+
+    def process_exception(self, request, exception, spider):
+        if isinstance(exception, self.EXCEPTIONS_TO_RETRY) \
+                and not request.meta.get('dont_retry', False):
+            
+            # Any exception needs to change another IP to retry
+            self.delete_proxy(request.meta.get('proxy', False))
+            proxy_ip = self.get_proxy_ip()
+            request.meta['proxy'] = proxy_ip
+            self.logger.info('Request exception and changing another IP to retry...')
+
+            return self._retry(request, exception, spider)
