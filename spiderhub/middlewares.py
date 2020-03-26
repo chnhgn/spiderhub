@@ -134,17 +134,11 @@ class SpiderRetryMiddleware(RetryMiddleware):
     get_ip_endpoint = '/get'
     del_ip_endpoint = '/delete?proxy=%s'
 
-    def get_proxy_api(self, num=10):
+    def get_proxy_api(self):
         ip_list = []
-        
-        for i in range(num):
-            response = requests.get("http://%s:%s%s" % (self.host, self.port, self.get_ip_endpoint))
-            content = json.loads(response.content.decode())
-            ip_list.append(content['proxy'])
+        response = requests.get("http://http.tiqu.alicdns.com/getip3?num=1&type=1&pro=0&city=0&yys=0&port=1&pack=89036&ts=0&ys=0&cs=0&lb=1&sb=0&pb=4&mr=1&regions=&gm=4")
+        ip_list.append(response.content.decode())
         return ip_list
-
-    def delete_proxy_api(self, proxy):
-        requests.get("http://%s:%s%s" % (self.host, self.port, self.del_ip_endpoint % proxy))
 
     def get_proxy_ip(self):
         self.lock.acquire()
@@ -159,8 +153,6 @@ class SpiderRetryMiddleware(RetryMiddleware):
     def delete_proxy(self, proxy):
         if proxy in self.proxy_list:
             self.proxy_list.remove(proxy)
-            # Delete the IP in database
-            self.delete_proxy_api(proxy)
 
     def process_request(self, request, spider):
         proxy_ip = request.meta.get('proxy')
