@@ -128,15 +128,12 @@ class SpiderRetryMiddleware(RetryMiddleware):
                            IOError, TunnelError, ProtocolError, ProxyError, ProxySchemeUnknown)
     proxy_list = []
     lock = threading.Lock()
-    
-    host = '127.0.0.1'
-    port = '5010'
-    get_ip_endpoint = '/get'
-    del_ip_endpoint = '/delete?proxy=%s'
+    # IP vendor
+    get_ip_endpoint = 'http://http.tiqu.alicdns.com/getip3?num=1&type=1&pro=0&city=0&yys=0&port=1&pack=89036&ts=0&ys=0&cs=0&lb=1&sb=0&pb=4&mr=1&regions=&gm=4'
 
     def get_proxy_api(self):
         ip_list = []
-        response = requests.get("http://http.tiqu.alicdns.com/getip3?num=1&type=1&pro=0&city=0&yys=0&port=1&pack=89036&ts=0&ys=0&cs=0&lb=1&sb=0&pb=4&mr=1&regions=&gm=4")
+        response = requests.get(self.get_ip_endpoint)
         ip_list.append(response.content.decode())
         return ip_list
 
@@ -145,8 +142,10 @@ class SpiderRetryMiddleware(RetryMiddleware):
         if not self.proxy_list:
             print('IP list is empty, getting IP...')
             self.proxy_list.extend(self.get_proxy_api())
-            
-        proxy_ip = self.proxy_list.pop(0) if self.proxy_list else ''
+        
+        # Pick an IP randomly from the IP pool to make the IP more efficient    
+        proxy_ip = random.choice(self.proxy_list) if self.proxy_list else ''
+        
         self.lock.release()
         return proxy_ip
 
@@ -158,7 +157,7 @@ class SpiderRetryMiddleware(RetryMiddleware):
         proxy_ip = request.meta.get('proxy')
         if not proxy_ip:
             proxy_ip = self.get_proxy_ip()
-            request.meta['proxy'] = proxy_ip
+            request.meta['proxy'] = 'http://' + proxy_ip
             if proxy_ip not in self.proxy_list:
                 self.proxy_list.append(proxy_ip)
 
@@ -167,11 +166,12 @@ class SpiderRetryMiddleware(RetryMiddleware):
         
         if not response.body:
             print(response.body)
+            
             self.logger.info('The IP is forbidden, changing another IP...')
-            print(proxy_ip)
+            
             self.delete_proxy(proxy_ip)  # Delete the invalid IP
             proxy_ip = self.get_proxy_ip()  # Get a new IP
-            request.meta['proxy'] = proxy_ip
+            request.meta['proxy'] = 'http://' + proxy_ip
             if proxy_ip not in self.proxy_list:
                 self.proxy_list.append(proxy_ip)
             return request
@@ -182,7 +182,9 @@ class SpiderRetryMiddleware(RetryMiddleware):
         if response.status in self.retry_http_codes:
             reason = response_status_message(response.status)
             self.delete_proxy(request.meta.get('proxy', False))  # Delete the IP if it's in the official retry status code
+            
             self.logger.info('Return invalid value, retrying...')
+            
             return self._retry(request, reason, spider) or response
         
         return response
@@ -194,7 +196,7 @@ class SpiderRetryMiddleware(RetryMiddleware):
             # Any exception needs to change another IP to retry
             self.delete_proxy(request.meta.get('proxy', False))
             proxy_ip = self.get_proxy_ip()
-            request.meta['proxy'] = proxy_ip
+            request.meta['proxy'] = 'http://' + proxy_ip
             self.logger.info('Request exception and changing another IP to retry...')
 
             return self._retry(request, exception, spider)
