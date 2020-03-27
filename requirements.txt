@@ -1,3 +1,4 @@
+requests
 scrapy
 redis
 scrapy-redis
