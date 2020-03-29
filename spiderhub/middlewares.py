@@ -129,12 +129,12 @@ class SpiderRetryMiddleware(RetryMiddleware):
     proxy_list = []
     lock = threading.Lock()
     # IP vendor
-    get_ip_endpoint = 'http://http.tiqu.alicdns.com/getip3?num=1&type=1&pro=0&city=0&yys=0&port=1&pack=89036&ts=0&ys=0&cs=0&lb=1&sb=0&pb=4&mr=1&regions=&gm=4'
+    get_ip_endpoint = 'http://http.tiqu.alicdns.com/getip3?num=20&type=1&pro=0&city=0&yys=0&port=1&pack=89195&ts=0&ys=0&cs=0&lb=1&sb=0&pb=4&mr=1&regions=&gm=4'
 
     def get_proxy_api(self):
         ip_list = []
         response = requests.get(self.get_ip_endpoint)
-        ip_list.append(response.content.decode())
+        ip_list = response.content.decode().replace('\r','').split('\n')
         return ip_list
 
     def get_proxy_ip(self):
